@@ -1,0 +1,73 @@
+#This file is Step 1 for comparing multiple datasets of human pituitary single cell/single nucleus data. First, pre-process each file individually, then merge them using the next code provided
+#Make sure you substitute "filename.h5" by the actual name of your file, and "name" by your chosen name. For example: normal_male, NAT_male...
+
+#install the following packages, then load them to your library
+
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(SeuratObject)
+
+
+#1 import into seurat either as H5 file or RDS
+
+name <- Read10X_h5("filename.h5")
+name <- CreateSeuratObject(name)
+
+#2 processing - SCT, PCA, UMAP, scale data
+#SCT - mitigate dropout effect. Bear in mind this is a computationally heavy step
+name <- SCTransform(name)
+
+#PCA - dimensionality reduction and noise reduction
+name <- RunPCA(name, features = VariableFeatures(object = name))
+print(name[["pca"]], dims = 1:10, nfeatures = 5)
+
+#normalisation and scaling to ensure homoscedasticity
+name <- NormalizeData(name, normalization.method = "LogNormalize", scale.factor = 10000)
+all.genes <- rownames(name)
+name <- ScaleData(name, features = all.genes)
+
+#3 UMAP calculations - this is to cluster the cells into their identities, so that you can find out what genes are up-regulated
+name <- FindNeighbors(name, dims = 1:15)
+name <- FindClusters(name, resolution = 0.1)
+
+name <- RunUMAP(name, dims = 1:15)
+DimPlot(name, reduction = "umap")
+
+#4 cell types labelling - First, you must find the genes that are up-regulated per cluster, in order to then label it
+name.markers <- FindAllMarkers(name, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+name.markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 5, order_by = avg_log2FC) %>%
+  print(n=80)
+
+#look for specific genes using Table 3 of my dissertation to label the human pituitary cells according to their markers
+
+FeaturePlot(name, features = "ALK", label = TRUE)
+
+#now, you are ready to label each cluster based on your FeaturePlot findings. Replace the number (bearing in mind it starts with 0) with the correct cluster name!
+new.cluster.ids <- c("0",
+                     "1", 
+                     "2", 
+                     "3", 
+                     "4", 
+                     "5", 
+                     "6", 
+                     "7",
+                     "8",
+                     "9")
+names(new.cluster.ids) <- levels(name)
+name <- RenameIdents(name, new.cluster.ids)
+DimPlot(name, reduction = "umap", label = TRUE, pt.size = 0.00001) + NoLegend()
+
+
+#5 manually create metadata to be used once you have merged the files
+name$dataset <- "FILE1"
+
+
+#6 save calculation to file
+saveRDS(file = "name.rds", name)
+
+
+#7 Well done! Now onto the next doc- merging :)
