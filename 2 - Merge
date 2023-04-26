@@ -1,0 +1,59 @@
+#This is step 2. Merging the three samples from the datasets (normal, NAT and tumour). Please be aware this is computationally intensive.
+
+#Make sure you substitute "filename_X.rds" by the actual name of your file, and "name" by your chosen name. For example, paediatricfemale, adultmale...
+#Load your libraries
+
+library(Seurat)
+library(ggplot2)
+library(harmony)
+
+#1 Load the RDS files produced in Step 1
+# Tumour
+tumour <- readRDS("filename_T.rds")
+# NAT
+NAT <- readRDS("filename_NAT.rds")
+# Paediatric tissue
+normal <- readRDS("filename_N.rds")
+
+#2 Visualise the data
+DimPlot(tumour, label = TRUE)
+DimPlot(NAT, label = TRUE)
+DimPlot(normal, label = TRUE)
+
+#Switch the labels out for any other markers you wish to investigate
+VlnPlot(tumour, features = c("PRL", "GH1", "POMC", "LHB"))
+VlnPlot(NAT, features = c("PRL", "GH1", "POMC", "LHB"))
+VlnPlot(normal, features = c("PRL", "GH1", "POMC", "LHB"))
+
+#3 Perform Harmony on the data. These files can only be merged two at a time, so merge two files into a new file, then merge that one to the remaining file. 
+merged_data <- merge(tumour, NAT, merge.data = TRUE)
+merged_data <- merge(merged_data, normal, merge.data = TRUE)
+
+#4 Check how many cells we have per dataset
+table(merged_data$dataset)
+
+#5 Process data to normalise it
+merged_data <- merged_data %>%
+    SCTransform() %>%
+    RunPCA() %>%
+    RunHarmony(
+        assay.use = "SCT",
+        dims.use = 1:30,
+        group.by.vars = "dataset"
+    ) %>%
+    RunUMAP(reduction = "harmony", dims = 1:30)
+
+#6 Visualise processed data
+DimPlot(merged_data, split.by = "dataset", label = TRUE)
+
+#7 Save this file to be used for normal/NAT enrichment analysis
+saveRDS(merged_data, "merged_data.rds")
+
+#8 Isolate the NAT and Tumour for cell-to-cell communication analysis
+merged_tumour_nat <- subset(merged_data, subset = dataset %in% c("tumour", "NAT"))
+
+#9 Visualise NAT/tumour data
+DimPlot(merged_tumour_nat, split.by = "dataset", label = TRUE)
+
+#10 Save this file to be used for cell-to-cell communication analysis
+saveRDS(merged_tumour_nat, "merged_tumour_nat_only.rds")
