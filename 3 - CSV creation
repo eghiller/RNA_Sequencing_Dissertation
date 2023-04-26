@@ -1,0 +1,33 @@
+#This step is ONLY for Normal/NAT enrichment analysis!
+#Remember in File 1 (preprocessing), this is where all your hard work comes in. The metadata will store the tissue type (NAT, normal...) as well as the clustered cell type (corticotrophs, celltypes...)
+
+#As always, be aware of file/label names
+
+#Load your libraries
+library("Seurat")
+library("dplyr")
+
+#1 Load your file
+merged_data <- readRDS("merged_data.rds")
+
+#2 Run differential expression analysis
+all_markers <- FindAllMarkers(merged_data, min.pct = 0.25, logfc.threshold = 0.25)
+
+#3 You will now need to create CSV files for each cell type you want to involve in the DEG analysis. Replace "celltype" with the target cell type. You will need to repeat this step as many times as the cell types you want.
+
+celltype <- subset(merged_data, ident="celltype")
+Idents(celltype) <- merged_data$dataset
+markers.celltype <- FindAllMarkers(celltype, min.pct = 0.25, logfc.threshold = 0.25)
+write.csv(markers.celltype, "celltype_markers.csv")
+
+#4 We will now create a background genes file to go into the "background" input in ShinyGO
+rownames(merged_data)
+
+write.csv(rownames(merged_data), "background PF.csv")
+write.csv(all_markers, "all markers AMC.csv")
+
+#Now, in the main input box in ShinyGO, input your celltype_markers.csv separately per tissue type by copying the genes only belonging to "normal" or "NAT". 
+#You will need to download the full table, making sure to label them as you go so that you don't lose tract of where your upregulated genes are from
+
+#Once you have processed all your data, you must now merge it into one big CSV by copying all of them in and superimposing them.
+#See you at the next step!
