@@ -1,0 +1,207 @@
+---
+title: "CellChat analysis of one dataset"
+author: Linda Laiho (with edits from the author of the dissertation)
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("")
+```
+
+### Load packages
+
+```{r}
+library(Seurat)
+library(harmony)
+```
+Cellchat can be hard to load, so here is the code you will need
+```{r}
+install.packages("CellChat")
+devtools::install_github("sqjin/CellChat")
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("ComplexHeatmap")
+
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("BiocNeighbors")
+library(CellChat)
+library(dplyr)
+library("ComplexHeatmap")
+```
+
+### Load clustered Seurat object
+
+load the tumour/NAT only file
+
+```{r}
+object <- readRDS("merged_tumour_nat_only.rds")
+```
+
+Make sure the cell type identities you want to use are set as Idents in the object. To check, make sure that output of the following is the cell types you want to use:
+
+```{r}
+table(Idents(object))
+
+```
+
+### Create cellchat object from your Seurat object
+
+```{r}
+cellchat <- createCellChat(object)
+```
+
+### Apply cellchat analysis pipeline to the newly created cellchat object
+
+Linda's abbreviated pipeline from the tutorials. Some notes:
+
+The number of ligand-receptor pairs inferred is based on the law of mass action. Each interaction will get a probability score based on gene expression data and knowledge about interactions between signalling partners and a permutation test (switching around cell identity labels) will generate a “noise threshold” to only pick up on the enriched interactions.
+
+By default, CellChat uses “trimean” (25% truncated mean, implying that the average gene expression is zero if the percent of expressing cells in one group is less than 25%) to calculate average expression of a gene in the cluster. This is a conservative approach that gives stronger interactions but can be set to a lower threshold.
+
+The only thing to change is what type of interactions you want to analyse. Choose (only!) one of the following: 
+
+```{r}
+#Run the line below if you want to analyse all interactions
+cellchat@DB <- CellChatDB.human
+
+#Run all of the below
+#First subset data to reduce computational cost
+cellchat <- subsetData(cellchat)
+#Speed up by applying parallel computing
+future::plan("multisession", workers = 4)
+#Identify DEGs per cell type
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+#Calculate communication probabilities
+cellchat <- computeCommunProb(cellchat)
+cellchat <- computeCommunProbPathway(cellchat)
+#Get the aggregated cell-cell interaction network
+cellchat <- aggregateNet(cellchat)
+#Calculate per-cell type interactions
+cellchat <- netAnalysis_computeCentrality(cellchat)
+```
+
+That's it, the analysis is done, save the cellchat object now!
+
+### Some basic numbers regarding the identified interactions
+
+How many significant interactions?
+
+```{r}
+LR_list <- subsetCommunication(cellchat)
+nrow(LR_list)
+```
+
+In how many pathways?
+
+```{r}
+length(cellchat@netP$pathways)
+```
+
+List all the pathways identified
+
+```{r}
+cellchat@netP$pathways
+```
+
+Number of significant interactions between each cell type pair
+
+```{r}
+cellchat@net$count
+```
+
+Strength of interactions between each cell type pair (note: I've found this to be sometimes very unreliable/give weird results, depends on dataset)
+
+### Plot time!!!
+
+7 examples of plots, look at the tutorial for more!
+
+1. "Global connectivity"
+
+```{r}
+groupSize <- as.numeric(table(cellchat@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = "Number of interactions")
+netVisual_circle(cellchat@net$weight, vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = "Interaction strength")
+```
+
+2. Dominant senders/receivers of signals
+
+```{r}
+netAnalysis_signalingRole_scatter(cellchat)
+```
+
+3. Dominant pathways sent/received by the different cell types
+
+```{r}
+ht1 <- netAnalysis_signalingRole_heatmap(cellchat, pattern = "outgoing")
+ht2 <- netAnalysis_signalingRole_heatmap(cellchat, pattern = "incoming")
+ht1 + ht2
+```
+
+4. Plot all interactions between cell type pairs of interest
+
+You need to change sources.use and targets.use to the numbers corresponding to the cell type based on the order they are in the output of table(Idents(object))
+
+```{r}
+netVisual_bubble(cellchat, sources.use = c(1,2,3,4,5,6,7,8,9,10), targets.use = 2, remove.isolate = FALSE, color.heatmap = "viridis")
+```
+
+5. Plot a pathway of interest to see between which cell types it is active
+
+Change "PATHWAY" to one of the pathways given in the output of cellchat@netP$pathways
+
+```{r}
+pathways.show <- "MIF"
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+```
+```{r}
+pathways.show <- "VEGF"
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+```
+```{r}
+pathways.show <- ""
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+```
+
+Optional: see which ligand-receptor interactions contribute how much to the PATHWAY of interest
+
+```{r}
+netAnalysis_contribution(cellchat, signaling = pathways.show)
+```
+
+6. Plot an interaction of interest to see between which cell types it is active
+
+```{r}
+pairLR <- extractEnrichedLR(cellchat, signaling = pathways.show, geneLR.return = FALSE)
+LR.show <- pairLR[2,]
+netVisual_individual(cellchat, signaling = pathways.show, pairLR.use = LR.show, layout = "circle")
+```
+
+7. Plot expression levels of interaction partners in a pathway ("sanity check")
+
+Again, change PATHWAY to a pathway-of-interest
+
+```{r}
+plotGeneExpression(cellchat, signaling = "VEGF")
+```
+
+### Saving plots
+
+CellChat is a bit annoying in how you have to save plots, here is an example on saving in format png. Note that you have to run the whole code block at once, don't try to run line-by-line.
+
+```{r}
+#Change "saved_plot_path.png" to the path where you want to save the image, play around with the dimensions and resolution
+png("saved_plot_path.png"), width = 10, height = 8, units = "in", res = 500)
+#Here goes the code to actually plot the plot you want to save
+plotGeneExpression(cellchat, signaling = "PATHWAY")
+#This closes off the plotting device
+dev.off()
+```
+
+If you plot many things, you might want to close R in between to clear out the plots, otherwise things can get a bit slow
