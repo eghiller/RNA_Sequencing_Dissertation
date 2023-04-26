@@ -1,0 +1,77 @@
+#Normal/NAT enrichment plotting time! 
+#In this file, we will be creating the final visualisations for upregulated genes between Normal and NAT. Depending on your data, not all cell types will appear. This is normal. It means that genes in other samples may not have met the minimum threshold for enrichment or commonality between pathways. 
+
+# As always, load required libraries
+library(ggplot2)
+library(dplyr)
+
+#1 Load your CSV file that should contain all NAT and Normal upregulated data from all cell types (as described at the end of the previous file)
+table_data <- read.csv("all_upregulated_genes.csv")
+
+#Check the columns of your data. Make sure the pathways column is entitled as such
+
+#2 Here, we are grouping pathways that are very similar. This is because many pathways relating to the same process may be labelled slightly differently, leading to a false negative when we visualise the data. To do this, double click on the "table_data" arrow in your global environment, which will load up the table in a new tab
+#From here, you may search up various processes or simply scroll through and manually decide what should be merged. 
+
+#There are several ways to merge the data. This first way is essentially - If "X" key work is present, then rename to A
+#Bear in mind this is case-sensitive, so you may need to repeat based on the contents of the table you are trying to change
+
+table_data$Pathway <- gsub(".*NF-k.*", "NF-KB signalling", table_data$Pathway, ignore.case = TRUE)
+
+#This method is for - If X AND Y, then rename to A
+table_data$Pathway <- ifelse(grepl(".*Viral.*", table_data$Pathway) & grepl(".*gene.*", table_data$Pathway),
+                             "Viral Gene Regulation Genes",
+                             table_data$Pathway)
+
+#This method is for - If X BUT NOT Y, then rename to A
+table_data$Pathway <- ifelse(grepl(".*Mitochondrion.*", table_data$Pathway) & !grepl(".*Transport.*", table_data$Pathway),
+                             "Mitochondrial Related Genes",
+                             table_data$Pathway)
+
+
+#3 Now save all your hard work!
+saveRDS(table_data, "updated_pathway_names.rds")
+
+#(here is the load command so if you close this file, you can resume from now using your saved updated pathway names)
+table_data <- readRDS("updated_pathway_names.rds")
+
+#4 Now we start selecting pathway frequency minimum, minimum FDR and minimum fold enrichment
+min_frequency <- 2  # Adjust this value to your desired minimum frequency
+pathway_frequency <- table(table_data$Pathway)
+nrow(pathway_frequency)
+
+#5 Filter by name and Fold enrichment. You can change these up based on what you are trying to look at. Make sure these names match those you have assigned in the table.
+subset_names <- c("Normal Lactotrophs", "Normal Gonadotrophs", "Normal Macrophages", "Normal Somatotrophs", "Normal T-cells", "Normal Endothelial Cells", "Normal Stem Cells", "Normal Thyrotrophs",
+                  "NAT Lactotrophs", "NAT Gonadotrophs", "NAT Macrophages", "NAT Somatotrophs", "NAT T-Cells", "NAT Endothelial Cells", "NAT Stem Cells", "NAT Thyrotrophs")
+
+
+filtered_data <- subset(table_data, Name %in% subset_names & Enrichment.FDR <= 0.05 & Fold.Enrichment > 4)
+
+#6 Find the pathways common to 20-50% of the datasets (change the 0.5 value to 0.2 as needed)
+common_pathways <- filtered_data %>%
+  group_by(Pathway) %>%
+  summarize(count = n()) %>%
+  filter(count >= length(subset_names) * 0.5) %>%
+  select(Pathway)
+
+#7 Filter the data to include only the common pathways
+common_data <- subset(filtered_data, Pathway %in% common_pathways$Pathway)
+
+#8 Now, define your custom colours for the plot! (Based on the subset names you have chosen)
+
+custom_colors <- c("Normal Gonadotrophs" = "#1f77b4", "Normal Macrophages" = "#4ca6cd", "Normal Lactotrophs" = "#aad9ff", "Normal Somatotrophs" = "#c2e1ff", "Normal T-cells" = "#d9e9ff", "Normal Endothelial Cells" = "#92c4e3", "Normal Stem Cells" = "#6fb1e0", "Normal Thyrotrophs" = "#3e9edc",
+                   "NAT Gonadotrophs" = "#c061a1", "NAT Macrophages" = "#e694cb", "NAT Stem Cells" = "#fcc2ea", "NAT Lactotrophs" = "#d37ab6", "NAT Somatotrophs" = "#f9ade0", "NAT T-cells" = "#ffd7f4", "NAT Endothelial cells" = "#f7a1c4", "NAT Thyrotrophs" = "#ef7ba9")
+
+#9 Finally, create the plot!
+plot <- ggplot(common_data, aes(x = Pathway, y = Fold.Enrichment, fill = Name)) +
+  geom_bar(width = 0.5, stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 63, hjust = 1, vjust = 1), 
+        plot.title = element_text(size = 20, hjust = 1)) +
+  labs(title = "Comparison of Commonly Enriched Pathways in Normal compared to NAT tissue (Paediatric Female)",
+       x = "Pathway",
+       y = "Fold Enrichment") + theme(axis.title = element_text(size = 15), axis.text.x = element_text(size = 14))
+
+plot
+
+#You have now completed your GEA!!
